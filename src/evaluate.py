@@ -63,9 +63,7 @@ def score(labeled: pd.DataFrame, anomalies: pd.DataFrame) -> dict[str, float]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument(
-        "--labeled", required=True, help="labeled transactions CSV (is_anomaly column)"
-    )
+    ap.add_argument("--labeled", required=True, help="labeled transactions CSV (is_anomaly column)")
     ap.add_argument(
         "--anomalies", required=True, help="anomalies.csv written by detect_anomalies.py"
     )
