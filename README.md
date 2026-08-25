@@ -1,5 +1,5 @@
 # Anomaly Detection (Transactions & Sales)
-Anomaly detection in synthetic transaction and sales data with Python. Generates realistic data, injects unusual events, and applies Isolation Forest, Local Outlier Factor, and Z-score methods to detect outliers. Produces anomaly reports and visualizations for portfolio-ready demonstration of data science skills.
+![CI](https://github.com/AmirhosseinHonardoust/Anomaly-Detection/actions/workflows/ci.yml/badge.svg)
 
 Detect anomalies in synthetic transaction data using Isolation Forest, Local Outlier Factor (LOF), and a Z-score baseline. The project generates data, injects anomalies, runs detectors, and exports flagged rows and charts for audit.
 
@@ -55,10 +55,30 @@ python data/generate_transactions.py --start 2023-01-01 --end 2024-12-31 --seed 
 python src/detect_anomalies.py --input data/transactions.csv --outdir outputs --contamination 0.02
 ```
 
-**Outputs**
+**Outputs** (written to `outputs/`, not committed — regenerate with the command above)
 - `outputs/anomalies.csv` – flagged rows with anomaly scores & model votes  
 - `outputs/fig_amount_time.png` – transaction amounts over time with spikes  
 - `outputs/fig_amount_hist.png` – amount distribution histogram  
+
+**How anomalies are scored**
+Each row gets a vote from three independent detectors (Isolation Forest, LOF, and a per-customer rolling Z-score). A row is reported as an anomaly if at least 2 of the 3 detectors flag it. `severity` blends the Isolation Forest and LOF scores (each min-max normalized to [0, 1]) into a single 0–1 ranking score.
+
+**Configuring the detectors** — all of these have working defaults matching the values above:
+```bash
+python src/detect_anomalies.py --input data/transactions.csv --outdir outputs \
+  --contamination 0.02 --rolling-window 7 --lof-n-neighbors 35 --zscore-threshold 3.5
+```
+
+---
+
+## Development
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+ruff check --select E,F,I,B,SIM,UP --line-length 100 .
+black --line-length 100 .
+mypy --ignore-missing-imports src data
+pytest
+```
 
 ---
 
