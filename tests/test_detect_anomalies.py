@@ -5,10 +5,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from detect_anomalies import load, run_models  # noqa: E402
-from utils import clean, feature_engineer  # noqa: E402
+from src.detect_anomalies import load, run_models
+from src.utils import clean, feature_engineer
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "src" / "detect_anomalies.py"
 
@@ -113,3 +111,56 @@ def test_cli_reports_error_for_missing_input(tmp_path):
         text=True,
     )
     assert result.returncode != 0
+    # Should be a clean, single-line message, not a raw Python traceback.
+    assert "[ERROR] Input file not found" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_cli_reports_error_when_nothing_survives_cleaning(tmp_path):
+    """Every row has an implausible negative amount, so clean() empties the
+    frame; main() should exit cleanly instead of crashing downstream."""
+    df = pd.DataFrame(
+        {
+            "tx_id": ["a", "b"],
+            "date": pd.to_datetime(["2023-01-01", "2023-01-02"]),
+            "customer_id": [1, 2],
+            "category": ["Home", "Toys"],
+            "amount": [-5000.0, -5000.0],
+        }
+    )
+    csv_path = tmp_path / "all_bad.csv"
+    df.to_csv(csv_path, index=False)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "--input",
+            str(csv_path),
+            "--outdir",
+            str(tmp_path / "out"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "[ERROR] No transactions remain after cleaning" in result.stderr
+
+
+def test_run_models_scales_features_before_lof(tmp_path):
+    """Regression test for the StandardScaler fix: without scaling, the
+    unscaled 'amount' column dominates LOF's distance metric and the
+    dayofweek/month features are effectively ignored."""
+    csv_path = _tiny_transactions(tmp_path)
+    df = load(str(csv_path))
+    df = clean(df)
+    df = feature_engineer(df, window=7)
+
+    # run_models should not raise, and should still return arrays of the
+    # right shape when features are on very different scales (amount is in
+    # the tens/thousands, dayofweek/month are single digits).
+    iso_labels, _, lof_labels, _, _ = run_models(df, contamination=0.05, lof_n_neighbors=5)
+    assert len(iso_labels) == len(df)
+    assert len(lof_labels) == len(df)
+    assert set(iso_labels) <= {-1, 1}
+    assert set(lof_labels) <= {-1, 1}

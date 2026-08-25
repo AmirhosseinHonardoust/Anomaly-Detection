@@ -2,11 +2,15 @@
 
 import pandas as pd
 
+# Amounts at or below this are treated as data-entry errors rather than
+# plausible (if unusual) transactions, and are dropped during cleaning.
+MIN_PLAUSIBLE_AMOUNT = -1000
+
 
 def clean(df: pd.DataFrame) -> pd.DataFrame:
     """Drop duplicate transaction IDs and implausible extreme negative amounts."""
     df = df.drop_duplicates(subset=["tx_id"]).copy()
-    df = df[df["amount"] > -1000].copy()
+    df = df[df["amount"] > MIN_PLAUSIBLE_AMOUNT].copy()
     return df
 
 
