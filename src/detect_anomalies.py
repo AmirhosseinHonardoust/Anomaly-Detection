@@ -2,13 +2,23 @@
 
 import argparse
 import os
+import sys
+from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 
-from utils import clean, feature_engineer, zscore_flags
+# Explicitly add this script's own directory to sys.path so `from utils import
+# ...` resolves regardless of how this file is invoked (as `python
+# src/detect_anomalies.py`, `python -m src.detect_anomalies`, or imported by
+# a test). Python only adds the script's directory automatically for the
+# first form, so we do it ourselves rather than relying on that behavior.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from utils import clean, feature_engineer, zscore_flags  # noqa: E402
 
 REQUIRED_COLUMNS = {"tx_id", "date", "customer_id", "category", "amount"}
 
@@ -32,7 +42,7 @@ def run_models(
     random_state: int = 42,
     lof_n_neighbors: int = 35,
     zscore_threshold: float = 3.5,
-):
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, pd.Series]:
     """Fit Isolation Forest, LOF, and the Z-score baseline; return labels/scores."""
     feats = df[["amount", "dayofweek", "month", "zscore_7"]].to_numpy()
 

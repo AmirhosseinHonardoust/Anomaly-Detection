@@ -44,6 +44,7 @@ pip install -r requirements.txt
 ---
 
 ## Generate Synthetic Data
+No sample data ships with the repo — generate it locally first (this also lets you pick any date range/size):
 ```bash
 python data/generate_transactions.py --start 2023-01-01 --end 2024-12-31 --seed 42 --n-customers 500 --out data/transactions.csv
 ```
