@@ -53,9 +53,9 @@ def test_score_raises_without_is_anomaly_column():
 def test_cli_end_to_end(tmp_path):
     labeled_path = tmp_path / "labeled.csv"
     anomalies_path = tmp_path / "anomalies.csv"
-    pd.DataFrame(
-        {"tx_id": ["a", "b", "c"], "is_anomaly": [True, False, True]}
-    ).to_csv(labeled_path, index=False)
+    pd.DataFrame({"tx_id": ["a", "b", "c"], "is_anomaly": [True, False, True]}).to_csv(
+        labeled_path, index=False
+    )
     pd.DataFrame({"tx_id": ["a"]}).to_csv(anomalies_path, index=False)
 
     result = subprocess.run(
