@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Generated outputs (regenerate with src/detect_anomalies.py)
+outputs/*.csv
+outputs/*.png
+!outputs/.gitkeep
