@@ -12,6 +12,19 @@ line-length = 100
 ignore_missing_imports = true
 python_version = "3.10"
 
+[[tool.mypy.overrides]]
+module = ["utils", "detect_anomalies", "generate_transactions"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+check_untyped_defs = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

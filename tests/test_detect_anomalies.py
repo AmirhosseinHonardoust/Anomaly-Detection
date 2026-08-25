@@ -1,3 +1,4 @@
+import subprocess
 import sys
 from pathlib import Path
 
@@ -8,6 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from detect_anomalies import load, run_models  # noqa: E402
 from utils import clean, feature_engineer  # noqa: E402
+
+SCRIPT_PATH = Path(__file__).resolve().parents[1] / "src" / "detect_anomalies.py"
 
 
 def _tiny_transactions(tmp_path: Path) -> Path:
@@ -55,3 +58,58 @@ def test_load_rejects_missing_columns(tmp_path):
     except ValueError:
         raised = True
     assert raised
+
+
+def test_cli_runs_end_to_end_and_writes_outputs(tmp_path):
+    """Exercise the actual CLI entry point (main/argparse), not just the
+    underlying functions, so a broken flag or wiring bug in main() is caught.
+    """
+    csv_path = _tiny_transactions(tmp_path)
+    outdir = tmp_path / "outputs"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "--input",
+            str(csv_path),
+            "--outdir",
+            str(outdir),
+            "--contamination",
+            "0.05",
+            "--lof-n-neighbors",
+            "5",
+            "--rolling-window",
+            "5",
+            "--zscore-threshold",
+            "3.0",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (outdir / "anomalies.csv").exists()
+    assert (outdir / "fig_amount_time.png").exists()
+    assert (outdir / "fig_amount_hist.png").exists()
+
+    anomalies = pd.read_csv(outdir / "anomalies.csv")
+    assert len(anomalies) >= 1
+    assert "severity" in anomalies.columns
+    assert "votes" in anomalies.columns
+
+
+def test_cli_reports_error_for_missing_input(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "--input",
+            str(tmp_path / "does_not_exist.csv"),
+            "--outdir",
+            str(tmp_path / "outputs"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0

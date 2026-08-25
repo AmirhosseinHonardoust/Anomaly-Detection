@@ -10,6 +10,10 @@ venv/
 .ruff_cache/
 .pytest_cache/
 
+# Generated data (regenerate with data/generate_transactions.py)
+data/*.csv
+!data/.gitkeep
+
 # Generated outputs (regenerate with src/detect_anomalies.py)
 outputs/*.csv
 outputs/*.png
