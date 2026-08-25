@@ -14,6 +14,14 @@ def generate(start: str, end: str, seed: int, n_customers: int) -> pd.DataFrame:
     Injects three kinds of anomalies (all driven by the seeded ``rng`` so the
     output is fully reproducible for a given seed): grocery bursts, extreme
     electronics purchases, and negative/zero-amount entries.
+
+    The returned frame always carries an ``is_anomaly`` column marking which
+    rows were injected as one of those three anomaly types (``True``) versus
+    ordinary background traffic (``False``). This ground truth is what lets
+    ``src/evaluate.py`` score how well the detectors actually find the
+    anomalies; ``main()`` strips the column by default so it doesn't leak
+    into a "real" input CSV unless explicitly requested via
+    ``--include-labels``.
     """
     rng = np.random.default_rng(seed)
     dates = pd.date_range(start=start, end=end, freq="D")
@@ -32,7 +40,7 @@ def generate(start: str, end: str, seed: int, n_customers: int) -> pd.DataFrame:
                 "Grocery": (2.2, 0.3),
             }[cat]
             amount = float(np.round(np.exp(rng.normal(*mu_sigma)), 2))
-            rows.append([tx_id, d.date(), cust, cat, amount])
+            rows.append([tx_id, d.date(), cust, cat, amount, False])
 
         if rng.random() < 0.05:
             for _ in range(rng.integers(30, 80)):
@@ -40,7 +48,7 @@ def generate(start: str, end: str, seed: int, n_customers: int) -> pd.DataFrame:
                 cust = int(rng.integers(1, n_customers + 1))
                 cat = "Grocery"
                 amount = float(np.round(np.exp(rng.normal(1.9, 0.25)), 2))
-                rows.append([tx_id, d.date(), cust, cat, amount])
+                rows.append([tx_id, d.date(), cust, cat, amount, True])
 
         if rng.random() < 0.03:
             for _ in range(rng.integers(3, 10)):
@@ -48,7 +56,7 @@ def generate(start: str, end: str, seed: int, n_customers: int) -> pd.DataFrame:
                 cust = int(rng.integers(1, n_customers + 1))
                 cat = "Electronics"
                 amount = float(np.round(rng.uniform(1500, 5000), 2))
-                rows.append([tx_id, d.date(), cust, cat, amount])
+                rows.append([tx_id, d.date(), cust, cat, amount, True])
 
         if rng.random() < 0.02:
             for _ in range(rng.integers(2, 6)):
@@ -56,9 +64,11 @@ def generate(start: str, end: str, seed: int, n_customers: int) -> pd.DataFrame:
                 cust = int(rng.integers(1, n_customers + 1))
                 cat = rng.choice(CATEGORIES)
                 amount = float(rng.choice([0.0, -rng.uniform(1, 50)]))
-                rows.append([tx_id, d.date(), cust, cat, amount])
+                rows.append([tx_id, d.date(), cust, cat, amount, True])
 
-    df = pd.DataFrame(rows, columns=["tx_id", "date", "customer_id", "category", "amount"])
+    df = pd.DataFrame(
+        rows, columns=["tx_id", "date", "customer_id", "category", "amount", "is_anomaly"]
+    )
     df["date"] = pd.to_datetime(df["date"])
     return df
 
@@ -70,9 +80,20 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=42, help="RNG seed for reproducibility")
     ap.add_argument("--n-customers", type=int, default=500)
     ap.add_argument("--out", default="data/transactions.csv")
+    ap.add_argument(
+        "--include-labels",
+        action="store_true",
+        help=(
+            "keep the 'is_anomaly' ground-truth column in the output CSV "
+            "(useful for scoring detector quality with src/evaluate.py; "
+            "omitted by default so the file matches a 'real' unlabeled input)"
+        ),
+    )
     args = ap.parse_args()
 
     df = generate(args.start, args.end, args.seed, args.n_customers)
+    if not args.include_labels:
+        df = df.drop(columns=["is_anomaly"])
     df.to_csv(args.out, index=False)
     print(f"[OK] wrote {args.out} with {len(df):,} rows")
 

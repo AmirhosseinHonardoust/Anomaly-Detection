@@ -5,6 +5,16 @@ src = ["src", "data", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "SIM", "UP"]
 
+[tool.ruff.lint.isort]
+# Tests import as `from src.x import ...` / `from data.x import ...`, treating
+# "src" and "data" as first-party namespace packages. The `src` roots list
+# above makes Ruff auto-detect bare names like `detect_anomalies` as
+# first-party (from scanning inside src/), but not the "src"/"data" package
+# prefixes themselves — without this, isort lumps `src.*`/`data.*` imports
+# into the third-party group with numpy/pandas and flags the intentional
+# blank line between them as "unsorted".
+known-first-party = ["src", "data"]
+
 [tool.black]
 line-length = 100
 
@@ -13,7 +23,7 @@ ignore_missing_imports = true
 python_version = "3.10"
 
 [[tool.mypy.overrides]]
-module = ["utils", "detect_anomalies", "generate_transactions"]
+module = ["utils", "detect_anomalies", "generate_transactions", "evaluate"]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 check_untyped_defs = true

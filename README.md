@@ -31,6 +31,7 @@ A transaction-fraud-style anomaly detection project that combines **Isolation Fo
 - [Generating Synthetic Data](#generating-synthetic-data)
 - [Running Anomaly Detection](#running-anomaly-detection)
 - [How Anomalies Are Scored](#how-anomalies-are-scored)
+- [Evaluating Detector Quality](#evaluating-detector-quality)
 - [Data Schema](#data-schema)
 - [Sample Results](#sample-results)
 - [Testing and CI](#testing-and-ci)
@@ -70,6 +71,7 @@ This project can:
 - Rank flagged rows with a blended 0–1 severity score
 - Export flagged rows to CSV with model votes and severity
 - Generate time-series and distribution charts for audit
+- Optionally retain the generator's own ground-truth anomaly labels and score the detectors' precision/recall/F1 against them
 - Run automated tests and a GitHub Actions CI workflow
 
 ---
@@ -93,23 +95,26 @@ A real fraud-detection system would need live transaction streams, case manageme
 - **Synthetic transaction generator** with a seeded RNG for full reproducibility
 - **Three injected anomaly types**: grocery bursts, extreme electronics purchases, negative/zero entries
 - **Calendar feature engineering**: day-of-week, month, and a per-customer rolling Z-score
-- **Multi-model detection**: Isolation Forest, Local Outlier Factor, and a rolling Z-score baseline
+- **Multi-model detection**: Isolation Forest, Local Outlier Factor, and a rolling Z-score baseline, with features standardized before fitting so no single feature's scale dominates
 - **Vote-based flagging**: a row is reported only if at least 2 of 3 detectors agree
 - **Blended severity score** combining normalized Isolation Forest and LOF scores
+- **Built-in evaluation**: score detector flags against the generator's own injected-anomaly ground truth
 - **Configurable detectors**: contamination, rolling window, LOF neighbors, and Z-score threshold are all CLI flags
 - **Audit visualizations**: transaction amounts over time and amount-distribution histogram
-- **Unit tests and GitHub Actions CI**
+- **Unit tests and GitHub Actions CI**, run across Python 3.11 and 3.12
 
 ---
 
 ## System Workflow
 
 ```text
-Synthetic transaction generator (seeded)
+Synthetic transaction generator (seeded, optional ground-truth labels)
         ↓
 Cleaning (dedupe, drop implausible amounts)
         ↓
 Feature engineering (calendar features, rolling Z-score)
+        ↓
+Feature standardization
         ↓
 Isolation Forest   +   Local Outlier Factor   +   Z-score baseline
         ↓
@@ -118,6 +123,8 @@ Vote-based flagging (>= 2 of 3 detectors agree)
 Blended severity score (0-1)
         ↓
 anomalies.csv + time-series & distribution charts
+        ↓
+(optional) evaluate.py — precision/recall/F1 vs. ground truth
 ```
 
 ---
@@ -142,10 +149,12 @@ Anomaly-Detection/
 │
 ├── src/
 │   ├── detect_anomalies.py
+│   ├── evaluate.py
 │   └── utils.py
 │
 ├── tests/
 │   ├── test_detect_anomalies.py
+│   ├── test_evaluate.py
 │   ├── test_generate_transactions.py
 │   └── test_utils.py
 │
@@ -228,6 +237,8 @@ python data/generate_transactions.py \
 
 The generator is fully reproducible for a given `--seed` and injects three kinds of anomalies alongside normal daily activity: grocery order bursts, extreme electronics purchases, and negative/zero-amount entries.
 
+Add `--include-labels` to also write the generator's own ground-truth `is_anomaly` column — useful for [evaluating detector quality](#evaluating-detector-quality), but omitted by default so the output matches what a real, unlabeled input file would look like.
+
 ---
 
 ## Running Anomaly Detection
@@ -273,9 +284,28 @@ Each row gets a vote from three independent detectors:
 
 </div>
 
+Before fitting, features (`amount`, `dayofweek`, `month`, `zscore_7`) are standardized to zero mean and unit variance. This makes no difference to Isolation Forest, whose splits are per-feature and scale-invariant, but it matters for LOF: unscaled, `amount` (range 0–5000+) would swamp the small-range calendar features in its distance metric, effectively hiding them from the neighborhood it computes.
+
 A row is reported as an anomaly if **at least 2 of the 3 detectors** flag it. `severity` blends the Isolation Forest and LOF scores, each min-max normalized to `[0, 1]`, into a single 0–1 ranking score, so reviewers can triage the most severe rows first.
 
 > Vote-based flagging is a transparency choice: a single model's outlier score can be noisy, but agreement across independently-behaving detectors is a stronger signal.
+
+---
+
+## Evaluating Detector Quality
+
+The generator knows exactly which rows it injected as anomalies. That ground truth is left out of the CSV by default, so it doesn't leak into what should look like a real, unlabeled input, but it can be kept with `--include-labels` and used to score how well the detectors actually find it:
+
+```bash
+python data/generate_transactions.py --start 2023-01-01 --end 2023-06-01 --seed 42 \
+  --n-customers 500 --out data/labeled.csv --include-labels
+
+python src/detect_anomalies.py --input data/labeled.csv --outdir outputs
+
+python src/evaluate.py --labeled data/labeled.csv --anomalies outputs/anomalies.csv
+```
+
+This prints true positives, false positives, false negatives, precision, recall, and F1 of the `votes >= 2` flags against the generator's injected anomalies. It's a check on the *synthetic* labeling only — it says nothing about how the same thresholds would perform on real-world fraud patterns.
 
 ---
 
@@ -290,6 +320,7 @@ A row is reported as an anomaly if **at least 2 of the 3 detectors** flag it. `s
 | `customer_id` | Customer identifier |
 | `category` | Product category |
 | `amount` | Transaction amount (float) |
+| `is_anomaly` | *(optional)* Ground-truth label, only present with `--include-labels` |
 
 </div>
 
@@ -333,7 +364,7 @@ black --line-length 100 --check .
 mypy --ignore-missing-imports src data
 ```
 
-The GitHub Actions workflow checks:
+The GitHub Actions workflow checks, on both Python 3.11 and 3.12:
 
 - dependency installation
 - linting with Ruff
@@ -357,9 +388,10 @@ The project separates responsibilities across modules:
 
 | Module | Purpose |
 |---|---|
-| `data/generate_transactions.py` | Seeded synthetic transaction generator with injected anomalies |
+| `data/generate_transactions.py` | Seeded synthetic transaction generator with injected anomalies and optional ground-truth labels |
 | `src/utils.py` | Cleaning, calendar feature engineering, and the rolling Z-score baseline |
 | `src/detect_anomalies.py` | Runs all three detectors, computes votes and severity, writes reports and charts |
+| `src/evaluate.py` | Scores flagged anomalies against the generator's ground truth (precision/recall/F1) |
 
 </div>
 
@@ -374,7 +406,7 @@ This project has important limitations:
 - All data is synthetic, no real transaction or customer data is used or required
 - The anomaly types are hand-designed, so real-world fraud patterns may look different
 - Thresholds (contamination, Z-score cutoff, LOF neighbors) are set manually, not learned
-- No ground-truth labels exist, so precision/recall against "true" anomalies can't be computed
+- Precision/recall can only be measured against the generator's own injected anomalies (via `--include-labels` + `evaluate.py`), not against real-world "true" anomalies
 - The vote-based rule treats all three detectors as equally trustworthy, which may not hold on other data
 
 The project is strongest as a portfolio demonstration of a multi-model, vote-based anomaly-detection workflow.
@@ -385,7 +417,7 @@ The project is strongest as a portfolio demonstration of a multi-model, vote-bas
 
 Potential next improvements:
 
-- Add labeled or semi-labeled anomalies to measure precision/recall
+- Add per-detector precision/recall breakdown (not just the combined vote) against the injected ground truth
 - Add an autoencoder or other deep-learning detector to the vote
 - Add per-category and per-customer severity breakdowns
 - Add a Streamlit dashboard for interactive review of flagged rows
