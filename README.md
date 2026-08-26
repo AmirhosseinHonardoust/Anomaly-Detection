@@ -445,7 +445,7 @@ CI is defined in:
 
 </div>
 
-Tooling is configured through `pyproject.toml` (ruff, black, mypy, pytest) and `requirements-dev.txt`. Contributors can install [pre-commit](https://pre-commit.com) hooks (`.pre-commit-config.yaml`) to run the same checks locally before every commit; see [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
+Tooling is configured through `pyproject.toml` (ruff, black, mypy, pytest) and `requirements-dev.txt`. Contributors can install [pre-commit](https://pre-commit.com) hooks (`.pre-commit-config.yaml`) to run the same checks locally before every commit; see [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow, [CHANGELOG.md](CHANGELOG.md) for a history of notable changes, and [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ---
 
