@@ -1,6 +1,7 @@
 """Run Isolation Forest, LOF, Z-score, and burst anomaly detection on transactions."""
 
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
@@ -16,10 +17,15 @@ from sklearn.preprocessing import StandardScaler
 # src/detect_anomalies.py`, `python -m src.detect_anomalies`, or imported by
 # a test). Python only adds the script's directory automatically for the
 # first form, so we do it ourselves rather than relying on that behavior.
+# `src/__init__.py` makes `src` a proper package (so `from src.detect_anomalies
+# import ...` works for imports), but does NOT put the repo root on sys.path
+# when this file is run directly by path, so this shim still earns its keep.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from plotting import save_report_figures  # noqa: E402
 from utils import add_burst_feature, clean, feature_engineer, zscore_flags  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 REQUIRED_COLUMNS = {"tx_id", "date", "customer_id", "category", "amount"}
 
@@ -108,7 +114,12 @@ def main() -> None:
             "ensemble that also votes on per-category daily-volume bursts"
         ),
     )
+    ap.add_argument("-q", "--quiet", action="store_true", help="only log warnings and errors")
+    ap.add_argument("-v", "--verbose", action="store_true", help="log debug-level detail")
     args = ap.parse_args()
+
+    level = logging.WARNING if args.quiet else logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(level=level, format="%(message)s")
 
     ensure_outdir(args.outdir)
 
@@ -154,9 +165,9 @@ def main() -> None:
 
     save_report_figures(out, args.outdir)
 
-    print("[OK] Anomaly detection complete.")
-    print(f"Flagged anomalies: {len(anomalies):,}")
-    print(f"Outputs saved to: {args.outdir}")
+    logger.info("[OK] Anomaly detection complete.")
+    logger.info("Flagged anomalies: %s", f"{len(anomalies):,}")
+    logger.info("Outputs saved to: %s", args.outdir)
 
 
 if __name__ == "__main__":

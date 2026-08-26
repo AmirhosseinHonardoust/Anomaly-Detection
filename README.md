@@ -33,6 +33,7 @@ A transaction-anomaly detection project that combines **Isolation Forest**, **Lo
 - [How Anomalies Are Scored](#how-anomalies-are-scored)
 - [Evaluating Against Ground Truth](#evaluating-against-ground-truth)
 - [Sample Results](#sample-results)
+  - [Tuning Guide](#tuning-guide)
 - [Data Schema](#data-schema)
 - [Testing and CI](#testing-and-ci)
 - [Code Quality](#code-quality)
@@ -317,6 +318,51 @@ python src/detect_anomalies.py --input data/labeled.csv --outdir outputs --conta
 python src/evaluate.py --labeled data/labeled.csv --anomalies outputs/anomalies.csv
 ```
 
+### Tuning Guide
+
+The CLI flags trade precision against recall. Measured on the same seeded
+dataset as above (`--start 2023-01-01 --end 2023-06-01 --seed 42`, 200
+customers), holding all other flags at their defaults:
+
+<div align="center">
+
+| `--contamination` | Precision | Recall | F1 |
+|---|---|---|---|
+| 0.01 | 0.097 | 0.111 | 0.103 |
+| 0.02 (default) | 0.082 | 0.145 | 0.105 |
+| 0.05 | 0.066 | 0.206 | 0.100 |
+
+| `--zscore-threshold` | Precision | Recall | F1 |
+|---|---|---|---|
+| 2.5 | 0.075 | 0.151 | 0.100 |
+| 3.5 (default) | 0.082 | 0.145 | 0.105 |
+| 4.5 | 0.092 | 0.143 | 0.112 |
+
+</div>
+
+- **`--contamination`** (Isolation Forest / LOF): raising it flags more rows
+  from both detectors, trading precision for recall. F1 peaks near the
+  default in this measurement, but the right value depends on how costly a
+  false positive vs. a missed anomaly is for your use case.
+- **`--zscore-threshold`**: raising it makes the per-customer Z-score baseline
+  stricter, trading recall for precision.
+- **`--lof-n-neighbors`**: larger values smooth LOF's local-density estimate
+  over more neighbors; too small relative to your data size will raise a
+  clear error (see `load`/`main` validation in `src/detect_anomalies.py`)
+  instead of a silent sklearn failure.
+- **`--burst-threshold`** / **`--burst-day-window`**: only affect the burst
+  detector's vote; disable it entirely with `--disable-burst-vote` to
+  reproduce the pre-burst-detector 3-vote ensemble (see the comparison table
+  above).
+
+Reproduce any row with:
+
+```bash
+python data/generate_transactions.py --start 2023-01-01 --end 2023-06-01 --seed 42 --n-customers 200 --out data/labeled.csv --include-labels
+python src/detect_anomalies.py --input data/labeled.csv --outdir outputs --contamination <value>
+python src/evaluate.py --labeled data/labeled.csv --anomalies outputs/anomalies.csv
+```
+
 ### Transaction Amount Distribution
 
 Shows most transactions are small (0–300 units). A few very large amounts (thousands) appear as outliers.
@@ -399,7 +445,7 @@ CI is defined in:
 
 </div>
 
-Tooling is configured through `pyproject.toml` (ruff, black, mypy, pytest) and `requirements-dev.txt`.
+Tooling is configured through `pyproject.toml` (ruff, black, mypy, pytest) and `requirements-dev.txt`. Contributors can install [pre-commit](https://pre-commit.com) hooks (`.pre-commit-config.yaml`) to run the same checks locally before every commit; see [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
 
 ---
 
