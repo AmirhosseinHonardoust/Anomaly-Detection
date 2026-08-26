@@ -9,6 +9,8 @@ venv/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+.coverage
+build/
 
 # Generated data (regenerate with data/generate_transactions.py)
 data/*.csv
