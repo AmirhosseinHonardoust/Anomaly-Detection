@@ -179,8 +179,9 @@ def test_run_models_scales_features_before_fitting(monkeypatch, tmp_path):
     original_fit_transform = detect_anomalies_module.StandardScaler.fit_transform
 
     def spy_fit_transform(self, X, *a, **kw):
-        calls.append(np.asarray(X))
-        return original_fit_transform(self, X, *a, **kw)
+        result = original_fit_transform(self, X, *a, **kw)
+        calls.append(result)
+        return result
 
     monkeypatch.setattr(detect_anomalies_module.StandardScaler, "fit_transform", spy_fit_transform)
     run_models(df, contamination=0.05, lof_n_neighbors=5)
