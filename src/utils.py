@@ -40,3 +40,42 @@ def feature_engineer(df: pd.DataFrame, window: int = 7) -> pd.DataFrame:
 def zscore_flags(df: pd.DataFrame, th: float = 3.5) -> pd.Series:
     """Flag rows whose rolling Z-score exceeds ``th`` (abs) or whose amount is <= 0."""
     return (df["zscore_7"].abs() >= th) | (df["amount"] <= 0)
+
+
+def add_burst_feature(df: pd.DataFrame, day_window: int = 30, clip: float = 50.0) -> pd.DataFrame:
+    """Add ``zscore_burst``: a per-category daily-volume Z-score.
+
+    The existing per-row features (``amount``, ``dayofweek``, ``month``,
+    ``zscore_7``) are all about a *single transaction*, so none of them can
+    see a day where one category suddenly gets far more transactions than
+    usual (e.g. a burst of many small grocery purchases). This adds a
+    feature for exactly that: for each category, the daily transaction
+    count is compared to that category's own rolling count over the prior
+    ``day_window`` days (``shift(1)`` before rolling, same prior-only
+    design as the per-customer Z-score in ``feature_engineer``, so a burst
+    day can't inflate its own baseline). The result is clipped to
+    ``+/-clip`` because near-zero historical variance can otherwise produce
+    extreme, unstable Z-scores that would distort ``StandardScaler``.
+
+    Measured on a seeded synthetic run (see README "Sample Results"), using
+    this as a 4th detector vote roughly doubled recall on ground-truth
+    anomalies versus the original 3-detector ensemble, because bursts are
+    a volume pattern the per-row detectors structurally cannot see.
+    """
+    df = df.copy()
+    df["_day"] = df["date"].dt.floor("D")
+    daily_counts = df.groupby(["_day", "category"]).size().rename("day_count").reset_index()
+    daily_counts = daily_counts.sort_values(["category", "_day"])
+    grouped = daily_counts.groupby("category")["day_count"]
+    prior_mean = grouped.transform(lambda s: s.shift(1).rolling(day_window, min_periods=1).mean())
+    prior_std = grouped.transform(lambda s: s.shift(1).rolling(day_window, min_periods=1).std())
+    daily_counts["burst_mean"] = prior_mean.fillna(daily_counts["day_count"])
+    daily_counts["burst_std"] = prior_std.fillna(0.0)
+    z = (daily_counts["day_count"] - daily_counts["burst_mean"]) / daily_counts[
+        "burst_std"
+    ].replace(0, 1e-9)
+    daily_counts["zscore_burst"] = z.clip(-clip, clip)
+    df = df.merge(
+        daily_counts[["_day", "category", "zscore_burst"]], on=["_day", "category"], how="left"
+    )
+    return df.drop(columns=["_day"])

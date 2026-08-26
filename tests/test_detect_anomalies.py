@@ -164,6 +164,62 @@ def test_cli_reports_clear_error_for_too_few_rows_for_lof_neighbors(tmp_path):
     assert "Not enough rows" in result.stderr
 
 
+def test_cli_writes_burst_columns_and_votes_out_of_four_by_default(tmp_path):
+    csv_path = _tiny_transactions(tmp_path)
+    outdir = tmp_path / "outputs"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "--input",
+            str(csv_path),
+            "--outdir",
+            str(outdir),
+            "--contamination",
+            "0.05",
+            "--lof-n-neighbors",
+            "5",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    anomalies = pd.read_csv(outdir / "anomalies.csv")
+    assert "zscore_burst" in anomalies.columns
+    assert "burst_label" in anomalies.columns
+    assert (anomalies["votes"] <= 4).all()
+
+
+def test_cli_disable_burst_vote_flag_falls_back_to_three_detectors(tmp_path):
+    """--disable-burst-vote should reproduce the pre-burst-detector 3-vote
+    behavior: votes possible range is 0-3, not 0-4."""
+    csv_path = _tiny_transactions(tmp_path)
+    outdir = tmp_path / "outputs"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "--input",
+            str(csv_path),
+            "--outdir",
+            str(outdir),
+            "--contamination",
+            "0.05",
+            "--lof-n-neighbors",
+            "5",
+            "--disable-burst-vote",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    anomalies = pd.read_csv(outdir / "anomalies.csv")
+    assert "burst_label" in anomalies.columns  # still computed/reported
+    assert (anomalies["votes"] <= 3).all()  # but excluded from the vote total
+
+
 def test_run_models_scales_features_before_fitting(monkeypatch, tmp_path):
     """StandardScaler().fit_transform should be called on the raw feature
     matrix before it reaches IsolationForest/LOF, so unscaled 'amount'

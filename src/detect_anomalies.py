@@ -1,11 +1,10 @@
-"""Run Isolation Forest, LOF, and Z-score anomaly detection on transactions."""
+"""Run Isolation Forest, LOF, Z-score, and burst anomaly detection on transactions."""
 
 import argparse
 import os
 import sys
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import IsolationForest
@@ -19,7 +18,8 @@ from sklearn.preprocessing import StandardScaler
 # first form, so we do it ourselves rather than relying on that behavior.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from utils import clean, feature_engineer, zscore_flags  # noqa: E402
+from plotting import save_report_figures  # noqa: E402
+from utils import add_burst_feature, clean, feature_engineer, zscore_flags  # noqa: E402
 
 REQUIRED_COLUMNS = {"tx_id", "date", "customer_id", "category", "amount"}
 
@@ -87,6 +87,27 @@ def main() -> None:
         default=3.5,
         help="absolute rolling Z-score above which a row is flagged",
     )
+    ap.add_argument(
+        "--burst-day-window",
+        type=int,
+        default=30,
+        help="rolling window (in days) for the per-category daily-volume burst baseline",
+    )
+    ap.add_argument(
+        "--burst-threshold",
+        type=float,
+        default=2.0,
+        help="absolute burst Z-score above which a day/category is flagged as a volume burst",
+    )
+    ap.add_argument(
+        "--disable-burst-vote",
+        action="store_true",
+        help=(
+            "vote using only Isolation Forest, LOF, and the per-customer Z-score "
+            "(pre-burst-detector 3-vote behavior), instead of the default 4-vote "
+            "ensemble that also votes on per-category daily-volume bursts"
+        ),
+    )
     args = ap.parse_args()
 
     ensure_outdir(args.outdir)
@@ -104,6 +125,7 @@ def main() -> None:
             "reduce --lof-n-neighbors or provide more data."
         )
     df = feature_engineer(df, window=args.rolling_window)
+    df = add_burst_feature(df, day_window=args.burst_day_window)
 
     iso_labels, iso_score, lof_labels, lof_score, z_flags = run_models(
         df,
@@ -116,7 +138,13 @@ def main() -> None:
     out["iso_label"] = (iso_labels == -1).astype(int)
     out["lof_label"] = (lof_labels == -1).astype(int)
     out["zscore_label"] = z_flags
-    out["votes"] = out[["iso_label", "lof_label", "zscore_label"]].sum(axis=1)
+    out["burst_label"] = (out["zscore_burst"].abs() >= args.burst_threshold).astype(int)
+
+    vote_cols = ["iso_label", "lof_label", "zscore_label"]
+    if not args.disable_burst_vote:
+        vote_cols.append("burst_label")
+    out["votes"] = out[vote_cols].sum(axis=1)
+
     s_iso = (iso_score - iso_score.min()) / max(1e-9, (iso_score.max() - iso_score.min()))
     s_lof = (lof_score - lof_score.min()) / max(1e-9, (lof_score.max() - lof_score.min()))
     out["severity"] = (s_iso + s_lof) / 2.0
@@ -124,24 +152,7 @@ def main() -> None:
     anomalies = out[out["votes"] >= 2].sort_values(["severity"], ascending=False)
     anomalies.to_csv(os.path.join(args.outdir, "anomalies.csv"), index=False)
 
-    fig1, ax1 = plt.subplots(figsize=(12, 4))
-    df_plot = out.sample(n=min(20000, len(out)), random_state=42).sort_values("date")
-    ax1.plot(df_plot["date"], df_plot["amount"])
-    ax1.set_title("Transaction Amount over Time (sample)")
-    ax1.set_xlabel("Date")
-    ax1.set_ylabel("Amount")
-    fig1.tight_layout()
-    fig1.savefig(os.path.join(args.outdir, "fig_amount_time.png"), dpi=160)
-    plt.close(fig1)
-
-    fig2, ax2 = plt.subplots(figsize=(8, 4))
-    ax2.hist(out["amount"], bins=60)
-    ax2.set_title("Amount Distribution")
-    ax2.set_xlabel("Amount")
-    ax2.set_ylabel("Count")
-    fig2.tight_layout()
-    fig2.savefig(os.path.join(args.outdir, "fig_amount_hist.png"), dpi=160)
-    plt.close(fig2)
+    save_report_figures(out, args.outdir)
 
     print("[OK] Anomaly detection complete.")
     print(f"Flagged anomalies: {len(anomalies):,}")

@@ -10,7 +10,7 @@
 
 </div>
 
-A transaction-anomaly detection project that combines **Isolation Forest**, **Local Outlier Factor (LOF)**, and a **per-customer rolling Z-score** into a single **majority-vote ensemble**, with a **synthetic data generator**, **feature scaling**, **severity ranking**, **visual reports**, and **precision/recall/F1 evaluation against ground truth**.
+A transaction-anomaly detection project that combines **Isolation Forest**, **Local Outlier Factor (LOF)**, a **per-customer rolling Z-score**, and a **per-category daily-volume burst detector** into a single **vote-based ensemble**, with a **synthetic data generator**, **feature scaling**, **severity ranking**, **visual reports**, and **precision/recall/F1 evaluation against ground truth**.
 
 > **Important:** This project runs on **synthetic transaction data** and is an **educational demo**, not a production fraud/anomaly system.
 >
@@ -47,7 +47,9 @@ A transaction-anomaly detection project that combines **Isolation Forest**, **Lo
 
 Anomaly detection is often presented as a single model producing a single score. In practice, one detector's blind spots are another's strength: distance-based methods struggle with unscaled features, tree-based methods can miss local density anomalies, and a simple statistical baseline can't see multivariate patterns at all.
 
-This project runs three different detectors over the same transaction data — Isolation Forest, LOF, and a per-customer rolling Z-score — and reports a transaction as anomalous only when at least two of the three agree. It includes a synthetic data generator with known injected anomalies, feature scaling so no single detector is dominated by raw transaction amount, visual reports, and a standalone evaluation script that scores flagged anomalies against ground-truth labels.
+This project runs four different detectors over the same transaction data — Isolation Forest, LOF, a per-customer rolling Z-score, and a per-category daily-volume burst detector — and reports a transaction as anomalous when at least two of the four agree. It includes a synthetic data generator with known injected anomalies, feature scaling so no single detector is dominated by raw transaction amount, visual reports, and a standalone evaluation script that scores flagged anomalies against ground-truth labels.
+
+The first three detectors all look at *individual rows* (an amount, a per-transaction Z-score). None of them can see a day where one category's transaction *volume* suddenly spikes — e.g. a burst of many small grocery purchases, where no single purchase looks unusual. The burst detector closes that gap by comparing each category's daily transaction count to its own recent history. Measured on a seeded synthetic run, adding it as a 4th vote roughly doubled recall on ground-truth anomalies (see [Sample Results](#sample-results)).
 
 The goal is to show a small, honest multi-model detection workflow, including the modeling pitfalls (like a rolling baseline leaking the current row into its own statistics) that are easy to introduce and easy to miss.
 
@@ -60,7 +62,8 @@ This project can:
 - Generate synthetic daily transactions with reproducible, seeded anomalies
 - Engineer a per-customer rolling Z-score from **prior transactions only**
 - Fit Isolation Forest and LOF on standardized features
-- Vote across all three detectors and flag rows with 2+ votes
+- Detect per-category daily-volume bursts from prior-days-only history
+- Vote across all four detectors and flag rows with 2+ votes
 - Rank flagged rows by a blended 0–1 severity score
 - Export flagged rows to CSV and render two summary charts
 - Score a set of flagged anomalies against labeled ground truth (precision/recall/F1)
@@ -87,8 +90,9 @@ A production system would need real labeled data, threshold tuning against busin
 
 - **Synthetic transaction generator** with three injected anomaly types: grocery bursts, extreme electronics purchases, and negative/zero-amount entries
 - **Per-customer rolling Z-score** computed from prior transactions only, so a spike can't inflate its own baseline
+- **Per-category daily-volume burst detector**, computed from prior days only, catching volume anomalies row-level detectors can't see
 - **Feature scaling** (`StandardScaler`) before Isolation Forest/LOF, so raw `amount` doesn't dominate LOF's distance calculation
-- **2-of-3 ensemble voting** across Isolation Forest, LOF, and the Z-score baseline
+- **2-of-4 ensemble voting** across Isolation Forest, LOF, the Z-score baseline, and the burst detector (falls back to the original 2-of-3 with `--disable-burst-vote`)
 - **Severity ranking** blending normalized Isolation Forest and LOF scores
 - **Clear input-validation errors** for empty-after-cleaning data and too-few-rows-for-LOF-neighbors
 - **Standalone evaluation script** for precision/recall/F1 against ground-truth labels
@@ -104,13 +108,13 @@ Synthetic transaction generator (seeded)
         ↓
 Load + clean (drop dup tx_id, extreme negatives)
         ↓
-Feature engineering (calendar features + prior-only rolling Z-score)
+Feature engineering (calendar features + prior-only rolling Z-score + prior-only burst Z-score)
         ↓
 Feature scaling (StandardScaler)
         ↓
-Isolation Forest  +  Local Outlier Factor  +  Z-score baseline
+Isolation Forest  +  Local Outlier Factor  +  Z-score baseline  +  burst detector
         ↓
-2-of-3 vote  →  flagged anomalies
+2-of-4 vote  →  flagged anomalies
         ↓
 Severity ranking (blended Isolation Forest / LOF score)
         ↓
@@ -135,13 +139,17 @@ Anomaly-Detection/
 ├── src/
 │   ├── detect_anomalies.py
 │   ├── evaluate.py
+│   ├── plotting.py
 │   └── utils.py
 │
 ├── tests/
 │   ├── test_detect_anomalies.py
 │   ├── test_evaluate.py
 │   ├── test_generate_transactions.py
+│   ├── test_plotting.py
 │   └── test_utils.py
+│
+├── Makefile
 │
 ├── outputs/
 │   ├── anomalies.csv
@@ -254,16 +262,19 @@ All detector parameters have working defaults matching the values above:
 
 ```bash
 python src/detect_anomalies.py --input data/transactions.csv --outdir outputs \
-  --contamination 0.02 --rolling-window 7 --lof-n-neighbors 35 --zscore-threshold 3.5
+  --contamination 0.02 --rolling-window 7 --lof-n-neighbors 35 --zscore-threshold 3.5 \
+  --burst-day-window 30 --burst-threshold 2.0
 ```
+
+Pass `--disable-burst-vote` to fall back to the original 3-detector ensemble (Isolation Forest, LOF, Z-score only) if you want the pre-burst-detector behavior.
 
 ---
 
 ## How Anomalies Are Scored
 
-Each row gets a vote from three detectors — Isolation Forest, LOF, and a per-customer rolling Z-score. A row is reported as an anomaly if **at least 2 of the 3** detectors flag it. `severity` blends the Isolation Forest and LOF scores (each min-max normalized to [0, 1]) into a single 0–1 ranking score.
+Each row gets a vote from four detectors — Isolation Forest, LOF, a per-customer rolling Z-score, and a per-category daily-volume burst detector. A row is reported as an anomaly if **at least 2 of the 4** detectors flag it. `severity` blends the Isolation Forest and LOF scores (each min-max normalized to [0, 1]) into a single 0–1 ranking score.
 
-> The rolling Z-score (`zscore_7`) is also one of the four features fed to Isolation Forest and LOF, so the three votes aren't fully independent — the Z-score baseline informs the ML models too, not just its own standalone vote. The baseline itself only looks at a customer's **prior** transactions (never the current row), so a large transaction can't inflate its own baseline and dampen its own score.
+> The rolling Z-score (`zscore_7`) is also one of the four features fed to Isolation Forest and LOF, so those three votes aren't fully independent — the Z-score baseline informs the ML models too, not just its own standalone vote. The baseline itself only looks at a customer's **prior** transactions (never the current row), so a large transaction can't inflate its own baseline and dampen its own score. The burst detector is independent of this: it works on daily per-category transaction counts, not individual amounts, so it catches a different failure mode (a sudden burst of many small transactions) that the row-level detectors structurally cannot see. It follows the same prior-only design (`--burst-day-window` days, `shift(1)` before rolling) so a burst day can't inflate its own baseline.
 
 Isolation Forest and LOF features are standardized (zero mean, unit variance) before fitting, so `amount` (which can run into the thousands) doesn't dominate LOF's distance-based neighbor calculation over the smaller-scale `dayofweek` / `month` / `zscore_7` features.
 
@@ -284,6 +295,27 @@ python src/evaluate.py --labeled data/labeled.csv --anomalies outputs/anomalies.
 ---
 
 ## Sample Results
+
+### Measured Detection Quality
+
+Running the full pipeline against a seeded, labeled synthetic dataset (`--start 2023-01-01 --end 2023-06-01 --seed 42`, 200 customers, ~46.6k rows, 767 true injected anomalies) and scoring with `evaluate.py`:
+
+<div align="center">
+
+| Ensemble | Precision | Recall | F1 |
+|---|---|---|---|
+| 3-detector (`--disable-burst-vote`) | 0.037 | 0.047 | 0.041 |
+| 4-detector (default, with burst vote) | 0.082 | 0.145 | 0.105 |
+
+</div>
+
+The burst detector roughly doubles recall because it catches a class of anomaly (sudden per-category transaction-volume spikes) that none of the row-level detectors can see. Even so, absolute precision and recall stay low — this is a real, honest result, not a target. The detectors are unusually specific: an individual transaction has to be genuinely extreme (in amount, timing, or its category's daily volume) to get flagged, so most "background" transactions correctly get zero votes, but that specificity also caps how much of the more subtle injected signal gets caught. Reproduce with:
+
+```bash
+python data/generate_transactions.py --start 2023-01-01 --end 2023-06-01 --seed 42 --n-customers 200 --out data/labeled.csv --include-labels
+python src/detect_anomalies.py --input data/labeled.csv --outdir outputs --contamination 0.02
+python src/evaluate.py --labeled data/labeled.csv --anomalies outputs/anomalies.csv
+```
 
 ### Transaction Amount Distribution
 
@@ -327,6 +359,12 @@ Run unit tests locally:
 pytest
 ```
 
+With coverage:
+
+```bash
+pytest --cov=src --cov=data --cov-report=term-missing
+```
+
 Lint, format-check, and type-check:
 
 ```bash
@@ -335,7 +373,9 @@ black --line-length 100 --check .
 mypy --ignore-missing-imports src data
 ```
 
-The GitHub Actions workflow runs, in order: dependency installation, ruff, black (`--check`), mypy, and pytest.
+Or via the Makefile: `make test`, `make cover`, `make lint`, `make format`, `make run`.
+
+The GitHub Actions workflow runs, in order: dependency installation, ruff, black (`--check`), mypy, and pytest with coverage.
 
 CI is defined in:
 
@@ -352,8 +392,9 @@ CI is defined in:
 | Module | Purpose |
 |---|---|
 | `data/generate_transactions.py` | Seeded synthetic transaction generator with injected anomalies |
-| `src/utils.py` | Cleaning, feature engineering, and the rolling Z-score baseline |
-| `src/detect_anomalies.py` | Isolation Forest / LOF / Z-score ensemble, CLI, and report generation |
+| `src/utils.py` | Cleaning, feature engineering, the rolling Z-score baseline, and the burst detector |
+| `src/detect_anomalies.py` | Isolation Forest / LOF / Z-score / burst ensemble and CLI |
+| `src/plotting.py` | Report chart generation, extracted for direct unit testing |
 | `src/evaluate.py` | Precision/recall/F1 scoring of flagged anomalies against ground truth |
 
 </div>
@@ -368,7 +409,8 @@ This project has important limitations:
 
 - All data is synthetic — real transaction data has different statistical properties
 - Detector defaults (contamination, thresholds, neighbor counts) are illustrative, not tuned
-- The Z-score baseline feature is shared with the ML detectors' inputs, so the three votes aren't fully independent (see [How Anomalies Are Scored](#how-anomalies-are-scored))
+- The Z-score baseline feature is shared with the ML detectors' inputs, so those votes aren't fully independent (see [How Anomalies Are Scored](#how-anomalies-are-scored))
+- Measured precision/recall/F1 are low in absolute terms (see [Sample Results](#sample-results)) — this is a demonstration of a multi-detector workflow, not a tuned or production-ready detector
 - `severity` is a relative, per-run ranking (min-max normalized), not a calibrated probability
 - No streaming/online detection — this is a batch CLI over a static CSV
 
