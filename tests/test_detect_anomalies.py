@@ -4,7 +4,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
 from src.detect_anomalies import load, run_models
 from src.utils import clean, feature_engineer
 
