@@ -1,5 +1,5 @@
 import pandas as pd
-from src.utils import clean, feature_engineer, zscore_flags
+from src.utils import add_burst_feature, clean, feature_engineer, zscore_flags
 
 
 def _sample_df() -> pd.DataFrame:
@@ -73,3 +73,47 @@ def test_feature_engineer_excludes_current_row_from_baseline():
     # epsilon, so excluding the spike from its own baseline produces a
     # very large z-score rather than a muted one.
     assert spike_row["zscore_7"] > 1000
+
+
+def _daily_df(day_category_counts: list[tuple[str, str, int]]) -> pd.DataFrame:
+    """Build a transactions frame with the given (date, category, count) rows."""
+    rows = []
+    tx = 0
+    for date, category, count in day_category_counts:
+        for _ in range(count):
+            rows.append({"tx_id": f"t{tx}", "date": date, "category": category, "amount": 10.0})
+            tx += 1
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+    return df
+
+
+def test_add_burst_feature_adds_column_without_dropping_rows():
+    df = _daily_df([("2023-01-01", "Grocery", 3), ("2023-01-02", "Grocery", 3)])
+    out = add_burst_feature(df)
+    assert "zscore_burst" in out.columns
+    assert len(out) == len(df)
+    assert not out["zscore_burst"].isna().any()
+
+
+def test_add_burst_feature_excludes_current_day_from_its_own_baseline():
+    """Regression test mirroring test_feature_engineer_excludes_current_row_from_baseline:
+    a burst day's own count must not feed its own mean/std, or the burst
+    dampens its own Z-score."""
+    normal_days = [(f"2023-01-{d:02d}", "Grocery", 5) for d in range(1, 6)]
+    burst_day = [("2023-01-06", "Grocery", 50)]
+    df = _daily_df(normal_days + burst_day)
+    out = add_burst_feature(df, day_window=30)
+    burst_rows = out[out["date"] == "2023-01-06"]
+    # Baseline should be ~5 (from the 5 prior days), not inflated by the
+    # burst day's own 50, so the burst gets a large positive Z-score.
+    assert (burst_rows["zscore_burst"] > 5).all()
+
+
+def test_add_burst_feature_clips_extreme_values():
+    """Near-zero historical variance can otherwise blow up the raw Z-score;
+    clipping keeps it from distorting StandardScaler if ever added as a
+    model feature."""
+    df = _daily_df([("2023-01-01", "Grocery", 5), ("2023-01-02", "Grocery", 500)])
+    out = add_burst_feature(df, day_window=30, clip=10.0)
+    assert out["zscore_burst"].abs().max() <= 10.0

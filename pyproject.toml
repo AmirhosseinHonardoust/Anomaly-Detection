@@ -13,7 +13,7 @@ ignore_missing_imports = true
 python_version = "3.12"
 
 [[tool.mypy.overrides]]
-module = ["utils", "detect_anomalies", "generate_transactions"]
+module = ["utils", "detect_anomalies", "generate_transactions", "plotting"]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 check_untyped_defs = true
