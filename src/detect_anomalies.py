@@ -23,17 +23,6 @@ from utils import clean, feature_engineer, zscore_flags  # noqa: E402
 
 REQUIRED_COLUMNS = {"tx_id", "date", "customer_id", "category", "amount"}
 
-# Centralized defaults so the CLI flags and the underlying function
-# signatures can't drift out of sync with each other.
-DEFAULT_CONTAMINATION = 0.02
-DEFAULT_ROLLING_WINDOW = 7
-DEFAULT_LOF_N_NEIGHBORS = 35
-DEFAULT_ZSCORE_THRESHOLD = 3.5
-
-# Cap on how many rows are sampled for the time-series plot, to keep large
-# datasets readable and fast to render.
-PLOT_SAMPLE_CAP = 20000
-
 
 def ensure_outdir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
@@ -50,29 +39,25 @@ def load(path: str) -> pd.DataFrame:
 
 def run_models(
     df: pd.DataFrame,
-    contamination: float = DEFAULT_CONTAMINATION,
+    contamination: float = 0.02,
     random_state: int = 42,
-    lof_n_neighbors: int = DEFAULT_LOF_N_NEIGHBORS,
-    zscore_threshold: float = DEFAULT_ZSCORE_THRESHOLD,
+    lof_n_neighbors: int = 35,
+    zscore_threshold: float = 3.5,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, pd.Series]:
-    """Fit Isolation Forest, LOF, and the Z-score baseline; return labels/scores.
-
-    Features are standardized (zero mean, unit variance) before fitting.
-    This has no effect on Isolation Forest (its splits are per-feature and
-    scale-invariant) but matters for LOF, which is distance-based: without
-    scaling, ``amount`` (range ~0-5000) would dominate ``dayofweek``/``month``
-    (range 0-12), effectively hiding the calendar features from LOF's notion
-    of a neighborhood.
-    """
+    """Fit Isolation Forest, LOF, and the Z-score baseline; return labels/scores."""
     feats = df[["amount", "dayofweek", "month", "zscore_7"]].to_numpy()
-    feats_scaled = StandardScaler().fit_transform(feats)
+    # LOF is distance-based, so unscaled "amount" (which can run into the
+    # thousands) would dominate its Euclidean neighbor distances over
+    # dayofweek/month/zscore_7 (single digits). Standardize all detector
+    # inputs so each feature contributes comparably.
+    scaled_feats = StandardScaler().fit_transform(feats)
 
     iso = IsolationForest(n_estimators=300, contamination=contamination, random_state=random_state)
-    iso_labels = iso.fit_predict(feats_scaled)
-    iso_score = -iso.decision_function(feats_scaled)
+    iso_labels = iso.fit_predict(scaled_feats)
+    iso_score = -iso.decision_function(scaled_feats)
 
     lof = LocalOutlierFactor(n_neighbors=lof_n_neighbors, contamination=contamination)
-    lof_labels = lof.fit_predict(feats_scaled)
+    lof_labels = lof.fit_predict(scaled_feats)
     lof_score = -lof.negative_outlier_factor_
 
     z_flags = zscore_flags(df, th=zscore_threshold).astype(int)
@@ -83,45 +68,41 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--input", required=True, help="path to transactions.csv")
     ap.add_argument("--outdir", default="outputs")
-    ap.add_argument("--contamination", type=float, default=DEFAULT_CONTAMINATION)
+    ap.add_argument("--contamination", type=float, default=0.02)
     ap.add_argument(
         "--rolling-window",
         type=int,
-        default=DEFAULT_ROLLING_WINDOW,
+        default=7,
         help="rolling window (in transactions) for the per-customer Z-score baseline",
     )
     ap.add_argument(
         "--lof-n-neighbors",
         type=int,
-        default=DEFAULT_LOF_N_NEIGHBORS,
+        default=35,
         help="n_neighbors passed to sklearn's LocalOutlierFactor",
     )
     ap.add_argument(
         "--zscore-threshold",
         type=float,
-        default=DEFAULT_ZSCORE_THRESHOLD,
+        default=3.5,
         help="absolute rolling Z-score above which a row is flagged",
     )
     args = ap.parse_args()
 
     ensure_outdir(args.outdir)
 
-    try:
-        df = load(args.input)
-    except FileNotFoundError:
-        print(f"[ERROR] Input file not found: {args.input}", file=sys.stderr)
-        sys.exit(1)
-    except ValueError as exc:
-        print(f"[ERROR] {exc}", file=sys.stderr)
-        sys.exit(1)
-    except pd.errors.ParserError as exc:
-        print(f"[ERROR] Could not parse input CSV: {exc}", file=sys.stderr)
-        sys.exit(1)
-
+    df = load(args.input)
     df = clean(df)
     if df.empty:
-        print("[ERROR] No transactions remain after cleaning; check input data.", file=sys.stderr)
-        sys.exit(1)
+        raise ValueError(
+            "No transactions remain after cleaning (clean() drops duplicate "
+            "tx_id rows and amounts <= -1000); check --input."
+        )
+    if len(df) <= args.lof_n_neighbors:
+        raise ValueError(
+            f"Not enough rows ({len(df)}) for --lof-n-neighbors={args.lof_n_neighbors}; "
+            "reduce --lof-n-neighbors or provide more data."
+        )
     df = feature_engineer(df, window=args.rolling_window)
 
     iso_labels, iso_score, lof_labels, lof_score, z_flags = run_models(
@@ -144,7 +125,7 @@ def main() -> None:
     anomalies.to_csv(os.path.join(args.outdir, "anomalies.csv"), index=False)
 
     fig1, ax1 = plt.subplots(figsize=(12, 4))
-    df_plot = out.sample(n=min(PLOT_SAMPLE_CAP, len(out)), random_state=42).sort_values("date")
+    df_plot = out.sample(n=min(20000, len(out)), random_state=42).sort_values("date")
     ax1.plot(df_plot["date"], df_plot["amount"])
     ax1.set_title("Transaction Amount over Time (sample)")
     ax1.set_xlabel("Date")

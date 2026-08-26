@@ -1,5 +1,4 @@
 import pandas as pd
-
 from src.utils import clean, feature_engineer, zscore_flags
 
 
@@ -48,3 +47,29 @@ def test_zscore_flags_catches_zero_and_negative_amounts():
 def test_zscore_flags_catches_high_zscore():
     df = pd.DataFrame({"amount": [10.0], "zscore_7": [5.0]})
     assert zscore_flags(df, th=3.5).iloc[0]
+
+
+def test_feature_engineer_excludes_current_row_from_baseline():
+    """Regression test: a transaction's own amount must not feed its own
+    rolling mean/std, or a spike dampens its own z-score. Four identical
+    $10 prior transactions followed by a $100 spike should compute the
+    spike's baseline from the four $10 rows only."""
+    df = pd.DataFrame(
+        {
+            "tx_id": ["t1", "t2", "t3", "t4", "t5"],
+            "date": pd.to_datetime(
+                ["2023-01-01", "2023-01-02", "2023-01-03", "2023-01-04", "2023-01-05"]
+            ),
+            "customer_id": [1, 1, 1, 1, 1],
+            "category": ["Home"] * 5,
+            "amount": [10.0, 10.0, 10.0, 10.0, 100.0],
+        }
+    )
+    out = feature_engineer(df, window=7)
+    spike_row = out.iloc[-1]
+    assert spike_row["roll_mean_7"] == 10.0
+    assert spike_row["roll_std_7"] == 0.0
+    # A std of 0 among identical prior amounts is replaced with a tiny
+    # epsilon, so excluding the spike from its own baseline produces a
+    # very large z-score rather than a muted one.
+    assert spike_row["zscore_7"] > 1000

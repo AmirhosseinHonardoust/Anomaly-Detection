@@ -2,15 +2,11 @@
 
 import pandas as pd
 
-# Amounts at or below this are treated as data-entry errors rather than
-# plausible (if unusual) transactions, and are dropped during cleaning.
-MIN_PLAUSIBLE_AMOUNT = -1000
-
 
 def clean(df: pd.DataFrame) -> pd.DataFrame:
     """Drop duplicate transaction IDs and implausible extreme negative amounts."""
     df = df.drop_duplicates(subset=["tx_id"]).copy()
-    df = df[df["amount"] > MIN_PLAUSIBLE_AMOUNT].copy()
+    df = df[df["amount"] > -1000].copy()
     return df
 
 
@@ -20,16 +16,23 @@ def feature_engineer(df: pd.DataFrame, window: int = 7) -> pd.DataFrame:
     ``window`` controls the rolling window (in transactions) used for each
     customer's rolling mean/std baseline. Defaults to 7 to match prior
     behavior.
+
+    The baseline for a row is computed from that customer's *prior*
+    transactions only (via ``shift(1)`` before rolling). Including the
+    current row in its own mean/std would let a huge transaction inflate
+    its own baseline and dampen its own Z-score. A customer's first
+    transaction has no prior history, so its baseline mean falls back to
+    its own amount (Z-score 0) and std falls back to 0 rather than NaN.
     """
     df = df.copy()
     df["dayofweek"] = df["date"].dt.dayofweek
     df["month"] = df["date"].dt.month
     df = df.sort_values(["customer_id", "date"])
     grouped = df.groupby("customer_id")["amount"]
-    df["roll_mean_7"] = grouped.transform(lambda s: s.rolling(window, min_periods=1).mean())
-    df["roll_std_7"] = grouped.transform(lambda s: s.rolling(window, min_periods=1).std()).fillna(
-        0.0
-    )
+    prior_roll_mean = grouped.transform(lambda s: s.shift(1).rolling(window, min_periods=1).mean())
+    prior_roll_std = grouped.transform(lambda s: s.shift(1).rolling(window, min_periods=1).std())
+    df["roll_mean_7"] = prior_roll_mean.fillna(df["amount"])
+    df["roll_std_7"] = prior_roll_std.fillna(0.0)
     df["zscore_7"] = (df["amount"] - df["roll_mean_7"]) / df["roll_std_7"].replace(0, 1e-9)
     return df
 

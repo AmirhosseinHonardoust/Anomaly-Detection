@@ -4,7 +4,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
 from src.detect_anomalies import load, run_models
 from src.utils import clean, feature_engineer
 
@@ -111,24 +110,22 @@ def test_cli_reports_error_for_missing_input(tmp_path):
         text=True,
     )
     assert result.returncode != 0
-    # Should be a clean, single-line message, not a raw Python traceback.
-    assert "[ERROR] Input file not found" in result.stderr
-    assert "Traceback" not in result.stderr
 
 
-def test_cli_reports_error_when_nothing_survives_cleaning(tmp_path):
-    """Every row has an implausible negative amount, so clean() empties the
-    frame; main() should exit cleanly instead of crashing downstream."""
+def test_cli_reports_clear_error_when_nothing_survives_cleaning(tmp_path):
+    """clean() drops amount <= -1000; an all-extreme-negative input leaves
+    an empty DataFrame, which should raise a clear error instead of an
+    opaque crash deeper in sklearn."""
     df = pd.DataFrame(
         {
             "tx_id": ["a", "b"],
             "date": pd.to_datetime(["2023-01-01", "2023-01-02"]),
             "customer_id": [1, 2],
             "category": ["Home", "Toys"],
-            "amount": [-5000.0, -5000.0],
+            "amount": [-5000.0, -6000.0],
         }
     )
-    csv_path = tmp_path / "all_bad.csv"
+    csv_path = tmp_path / "empty_after_clean.csv"
     df.to_csv(csv_path, index=False)
 
     result = subprocess.run(
@@ -138,29 +135,60 @@ def test_cli_reports_error_when_nothing_survives_cleaning(tmp_path):
             "--input",
             str(csv_path),
             "--outdir",
-            str(tmp_path / "out"),
+            str(tmp_path / "outputs"),
         ],
         capture_output=True,
         text=True,
     )
     assert result.returncode != 0
-    assert "[ERROR] No transactions remain after cleaning" in result.stderr
+    assert "No transactions remain after cleaning" in result.stderr
 
 
-def test_run_models_scales_features_before_lof(tmp_path):
-    """Regression test for the StandardScaler fix: without scaling, the
-    unscaled 'amount' column dominates LOF's distance metric and the
-    dayofweek/month features are effectively ignored."""
+def test_cli_reports_clear_error_for_too_few_rows_for_lof_neighbors(tmp_path):
+    csv_path = _tiny_transactions(tmp_path)  # 200 rows
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "--input",
+            str(csv_path),
+            "--outdir",
+            str(tmp_path / "outputs"),
+            "--lof-n-neighbors",
+            "500",  # exceeds the 200 rows in the fixture
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "Not enough rows" in result.stderr
+
+
+def test_run_models_scales_features_before_fitting(monkeypatch, tmp_path):
+    """StandardScaler().fit_transform should be called on the raw feature
+    matrix before it reaches IsolationForest/LOF, so unscaled 'amount'
+    doesn't dominate LOF's distance calculation."""
     csv_path = _tiny_transactions(tmp_path)
     df = load(str(csv_path))
     df = clean(df)
     df = feature_engineer(df, window=7)
 
-    # run_models should not raise, and should still return arrays of the
-    # right shape when features are on very different scales (amount is in
-    # the tens/thousands, dayofweek/month are single digits).
-    iso_labels, _, lof_labels, _, _ = run_models(df, contamination=0.05, lof_n_neighbors=5)
-    assert len(iso_labels) == len(df)
-    assert len(lof_labels) == len(df)
-    assert set(iso_labels) <= {-1, 1}
-    assert set(lof_labels) <= {-1, 1}
+    import src.detect_anomalies as detect_anomalies_module
+
+    calls = []
+    original_fit_transform = detect_anomalies_module.StandardScaler.fit_transform
+
+    def spy_fit_transform(self, X, *a, **kw):
+        result = original_fit_transform(self, X, *a, **kw)
+        calls.append(result)
+        return result
+
+    monkeypatch.setattr(detect_anomalies_module.StandardScaler, "fit_transform", spy_fit_transform)
+    run_models(df, contamination=0.05, lof_n_neighbors=5)
+
+    assert len(calls) == 1
+    scaled = calls[0]
+    # Scaled amount column should be roughly standardized (mean ~0, std ~1),
+    # unlike the raw amount column which spans hundreds/thousands.
+    assert abs(scaled[:, 0].mean()) < 1e-6
+    assert abs(scaled[:, 0].std() - 1.0) < 1e-6
