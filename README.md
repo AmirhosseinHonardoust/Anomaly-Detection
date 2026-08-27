@@ -1,15 +1,15 @@
 <div align="center">
-   
+
 # Anomaly Detection (Transactions & Sales)
-                             
+
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-Isolation%20Forest%20%2B%20LOF-orange)
 ![Detection](https://img.shields.io/badge/Detection-Z--Score%20%2B%20Ensemble%20Voting-green)
 ![Status](https://img.shields.io/badge/Status-Educational%20ML%20Project-purple)
 [![CI](https://github.com/AmirhosseinHonardoust/Anomaly-Detection/actions/workflows/ci.yml/badge.svg)](https://github.com/AmirhosseinHonardoust/Anomaly-Detection/actions/workflows/ci.yml)
-                            
+
 </div>
-     
+
 A transaction-anomaly detection project that combines **Isolation Forest**, **Local Outlier Factor (LOF)**, a **per-customer rolling Z-score**, and a **per-category daily-volume burst detector** into a single **vote-based ensemble**, with a **synthetic data generator**, **feature scaling**, **severity ranking**, **visual reports**, and **precision/recall/F1 evaluation against ground truth**.
 
 > **Important:** This project runs on **synthetic transaction data** and is an **educational demo**, not a production fraud/anomaly system.
