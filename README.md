@@ -1,7 +1,7 @@
 <div align="center">
    
 # Anomaly Detection (Transactions & Sales)
-                       
+                             
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-Isolation%20Forest%20%2B%20LOF-orange)
 ![Detection](https://img.shields.io/badge/Detection-Z--Score%20%2B%20Ensemble%20Voting-green)
