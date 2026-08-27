@@ -9,7 +9,7 @@
 [![CI](https://github.com/AmirhosseinHonardoust/Anomaly-Detection/actions/workflows/ci.yml/badge.svg)](https://github.com/AmirhosseinHonardoust/Anomaly-Detection/actions/workflows/ci.yml)
  
 </div>
- 
+     
 A transaction-anomaly detection project that combines **Isolation Forest**, **Local Outlier Factor (LOF)**, a **per-customer rolling Z-score**, and a **per-category daily-volume burst detector** into a single **vote-based ensemble**, with a **synthetic data generator**, **feature scaling**, **severity ranking**, **visual reports**, and **precision/recall/F1 evaluation against ground truth**.
 
 > **Important:** This project runs on **synthetic transaction data** and is an **educational demo**, not a production fraud/anomaly system.
