@@ -1,6 +1,7 @@
 <div align="center">
 
 # Anomaly Detection (Transactions & Sales)
+<img width="1672" height="940" alt="Anomaly-Detection" src="https://github.com/user-attachments/assets/1c6147dd-f961-4c95-bece-ea1ac9bfd1c3" />
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-Isolation%20Forest%20%2B%20LOF-orange)
