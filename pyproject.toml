@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,10 +10,10 @@ readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12"
 dependencies = [
-    "pandas==2.3.3",
-    "numpy==2.5.2",
-    "matplotlib==3.11.1",
-    "scikit-learn==1.9.0",
+    "pandas==3.0.5",
+    "numpy==2.5.3",
+    "matplotlib==3.11.2",
+    "scikit-learn==1.9.1",
 ]
 
 [tool.setuptools]
